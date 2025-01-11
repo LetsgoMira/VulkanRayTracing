@@ -34,7 +34,6 @@ const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 
 const std::string MODEL_PATH = "models/bunny.obj";
-const std::string TEXTURE_PATH = "textures/viking_room.png";
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -159,7 +158,7 @@ public:
     }
 
 private:
-    clock_t t1=0, t2=0;
+    clock_t t1 = 0, t2 = 0;
 
     GLFWwindow* window;
 
@@ -187,19 +186,10 @@ private:
 
     VkCommandPool commandPool;
 
-    VkImage depthImage;
-    VkDeviceMemory depthImageMemory;
-    VkImageView depthImageView;
-
     VkImage changeImage;
     VkDeviceMemory changeImageMemory;
     VkImageView changeImageView;
     VkSampler changSampler;
-
-    VkImage textureImage;
-    VkDeviceMemory textureImageMemory;
-    VkImageView textureImageView;
-    VkSampler textureSampler;
 
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
@@ -226,7 +216,7 @@ private:
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-        window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
+        window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan Raytracing", nullptr, nullptr);
         glfwSetWindowUserPointer(window, this);
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
     }
@@ -248,12 +238,8 @@ private:
         createDescriptorSetLayout();
         createGraphicsPipeline();
         createCommandPool();
-        createDepthResources();
         createChangeImgResources();
         createFramebuffers();
-        createTextureImage();
-        createTextureImageView();
-        createTextureSampler();
         loadModel();
         createBVH(BVHNodes,0,triangles.size()-3,1);
         createResourceBuffer();
@@ -273,10 +259,6 @@ private:
     }
 
     void cleanupSwapChain() {
-        vkDestroyImageView(device, depthImageView, nullptr);
-        vkDestroyImage(device, depthImage, nullptr);
-        vkFreeMemory(device, depthImageMemory, nullptr);
-
         for (auto framebuffer : swapChainFramebuffers) {
             vkDestroyFramebuffer(device, framebuffer, nullptr);
         }
@@ -297,11 +279,10 @@ private:
 
         vkDestroyDescriptorPool(device, descriptorPool, nullptr);
 
-        vkDestroySampler(device, textureSampler, nullptr);
-        vkDestroyImageView(device, textureImageView, nullptr);
-
-        vkDestroyImage(device, textureImage, nullptr);
-        vkFreeMemory(device, textureImageMemory, nullptr);
+        vkDestroySampler(device, changSampler, nullptr);
+        vkDestroyImageView(device, changeImageView, nullptr);
+        vkDestroyImage(device, changeImage, nullptr);
+        vkFreeMemory(device, changeImageMemory, nullptr);
 
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 
@@ -341,10 +322,8 @@ private:
         vkDeviceWaitIdle(device);
 
         cleanupSwapChain();
-
         createSwapChain();
         createImageViews();
-        createDepthResources();
         createFramebuffers();
     }
 
@@ -355,7 +334,7 @@ private:
 
         VkApplicationInfo appInfo{};
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-        appInfo.pApplicationName = "Hello Triangle";
+        appInfo.pApplicationName = "Vulkan Ray Tracing";
         appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
         appInfo.pEngineName = "No Engine";
         appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
@@ -544,6 +523,7 @@ private:
     }
 
     void createRenderPass() {
+        //changeAttachment:每一帧更新和读取的渲染结果
         VkAttachmentDescription changeAttachment{};
         changeAttachment.format = VK_FORMAT_R8G8B8A8_UNORM;
         changeAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -828,13 +808,6 @@ private:
         }
     }
 
-    void createDepthResources() {
-        VkFormat depthFormat = findDepthFormat();
-
-        createImage(swapChainExtent.width, swapChainExtent.height, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImage, depthImageMemory);
-        depthImageView = createImageView(depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
-    }
-
     void createChangeImgResources() {
         VkFormat changeImgFormat = VK_FORMAT_R8G8B8A8_UNORM;
 
@@ -843,6 +816,7 @@ private:
         transitionImageLayout(changeImage, changeImgFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
         VkPhysicalDeviceProperties properties{};
         vkGetPhysicalDeviceProperties(physicalDevice, &properties);
+
         VkSamplerCreateInfo samplerInfo{};
         samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
         samplerInfo.magFilter = VK_FILTER_LINEAR;
@@ -888,64 +862,6 @@ private:
 
     bool hasStencilComponent(VkFormat format) {
         return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;
-    }
-
-    void createTextureImage() {
-        int texWidth, texHeight, texChannels;
-        stbi_uc* pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
-        VkDeviceSize imageSize = texWidth * texHeight * 4;
-
-        if (!pixels) {
-            throw std::runtime_error("failed to load texture image!");
-        }
-
-        VkBuffer stagingBuffer;
-        VkDeviceMemory stagingBufferMemory;
-        createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
-
-        void* data;
-        vkMapMemory(device, stagingBufferMemory, 0, imageSize, 0, &data);
-        memcpy(data, pixels, static_cast<size_t>(imageSize));
-        vkUnmapMemory(device, stagingBufferMemory);
-
-        stbi_image_free(pixels);
-
-        createImage(texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage, textureImageMemory);
-
-        transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        copyBufferToImage(stagingBuffer, textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
-        transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
-        vkDestroyBuffer(device, stagingBuffer, nullptr);
-        vkFreeMemory(device, stagingBufferMemory, nullptr);
-    }
-
-    void createTextureImageView() {
-        textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
-    }
-
-    void createTextureSampler() {
-        VkPhysicalDeviceProperties properties{};
-        vkGetPhysicalDeviceProperties(physicalDevice, &properties);
-
-        VkSamplerCreateInfo samplerInfo{};
-        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        samplerInfo.magFilter = VK_FILTER_LINEAR;
-        samplerInfo.minFilter = VK_FILTER_LINEAR;
-        samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        samplerInfo.anisotropyEnable = VK_TRUE;
-        samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
-        samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-        samplerInfo.unnormalizedCoordinates = VK_FALSE;
-        samplerInfo.compareEnable = VK_FALSE;
-        samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
-        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-
-        if (vkCreateSampler(device, &samplerInfo, nullptr, &textureSampler) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create texture sampler!");
-        }
     }
 
     VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags) {
@@ -1111,7 +1027,7 @@ private:
                 };*/
                 vertex.color = { 0.6,0.6,0.6 };
                 vertex.emissive = false;
-                vertex.roughness = 0.8;
+                vertex.roughness = 1;
                 /*vertex.texCoord = {
                     attrib.texcoords[2 * index.texcoord_index + 0],
                     1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
@@ -1188,41 +1104,21 @@ private:
         if (t1 == t2) return false;
         glm::vec3 center1 = vertices[indices[3 * triangles[t1]]].pos + vertices[indices[3 * triangles[t1] + 1]].pos + vertices[indices[3 * triangles[t1] + 2]].pos;
         glm::vec3 center2 = vertices[indices[3 * triangles[t2]]].pos + vertices[indices[3 * triangles[t2] + 1]].pos + vertices[indices[3 * triangles[t2] + 2]].pos;
-        //if (center1.x == center2.x) {
-        //    if (center1.y == center2.y) {
-        //        return center1.z < center2.z;  // compare z if y is equal
-        //    }
-        //    return center1.y < center2.y;  // compare y if x is equal
-        //}
         if (center1.x = center2.x)   return t1 < t2;
-        return center1.x < center2.x;  // compare x first
+        return center1.x < center2.x; 
     }
     bool cmpy(const uint32_t& t1, const uint32_t& t2) {
         if (t1 == t2) return false;
         glm::vec3 center1 = (vertices[indices[3 * triangles[t1]]].pos + vertices[indices[3 * triangles[t1] + 1]].pos + vertices[indices[3 * triangles[t1] + 2]].pos);
         glm::vec3 center2 = (vertices[indices[3 * triangles[t2]]].pos + vertices[indices[3 * triangles[t2] + 1]].pos + vertices[indices[3 * triangles[t2] + 2]].pos);
-        //if (center1.y == center2.y) {
-        //    if (center1.x == center2.x) {
-        //        return center1.z < center2.z;  // compare z if y is equal
-        //    }
-        //    return center1.x < center2.x;  // compare y if x is equal
-        //}
         if (center1.y = center2.y)   return t1 < t2;
-
         return center1.y < center2.y;
     }
     bool cmpz(const uint32_t& t1, const uint32_t& t2) {
         if (t1 == t2) return false;
         glm::vec3 center1 = (vertices[indices[3 * triangles[t1]]].pos + vertices[indices[3 * triangles[t1] + 1]].pos + vertices[indices[3 * triangles[t1] + 2]].pos);
         glm::vec3 center2 = (vertices[indices[3 * triangles[t2]]].pos + vertices[indices[3 * triangles[t2] + 1]].pos + vertices[indices[3 * triangles[t2] + 2]].pos);
-        //if (center1.z == center2.z) {
-        //    if (center1.x == center2.x) {
-        //        return center1.y < center2.y;  // compare z if y is equal
-        //    }
-        //    return center1.x < center2.x;  // compare y if x is equal
-        //}
         if (center1.z = center2.z)   return t1 < t2;
-
         return center1.z < center2.z;
     }
 
@@ -1256,30 +1152,6 @@ private:
             nodes[id].index = l;
             return id;
         }
-
-        //float lenx = nodes[id].BB.x - nodes[id].AA.x;
-        //float leny = nodes[id].BB.y - nodes[id].AA.y;
-        //float lenz = nodes[id].BB.z - nodes[id].AA.z;
-        //if (lenx >= leny && lenx >= lenz)
-        //    std::sort(triangles.begin() + l, triangles.begin() + r + 1, [this](const uint32_t& t1, const uint32_t& t2) {
-        //            return cmpx(t1, t2);  // 调用成员函数
-        //           });
-        //// 按 y 划分
-        //if (leny >= lenx && leny >= lenz)
-        //    std::sort(triangles.begin() + l, triangles.begin() + r + 1, [this](const uint32_t& t1, const uint32_t& t2) {
-        //           return cmpy(t1, t2);  // 调用成员函数
-        //            });
-        //// 按 z 划分
-        //if (lenz >= lenx && lenz >= leny)
-        //    std::sort(triangles.begin() + l, triangles.begin() + r + 1, [this](const uint32_t& t1, const uint32_t& t2) {
-        //            return cmpz(t1, t2);  // 调用成员函数
-        //            });
-
-        //int mid = (l + r) / 2;
-        //nodes[id].left = createBVH(nodes, l, mid, n);
-        //nodes[id].right = createBVH(nodes, mid + 1, r, n);
-        //return id;
-
         // 否则递归建树(SAH优化)
         float Cost = INFINITY;
         int Axis = 0;
@@ -1287,13 +1159,13 @@ private:
         for (int axis = 0; axis < 3; ++axis) {
             // 分别按 x，y，z 轴排序
             if (axis == 0) std::sort(triangles.begin() + l, triangles.begin() + r + 1, [this](const uint32_t& t1, const uint32_t& t2) {
-                return cmpx(t1, t2);  // 调用成员函数
+                return cmpx(t1, t2);  
                 });
             if (axis == 1) std::sort(triangles.begin() + l, triangles.begin() + r + 1, [this](const uint32_t& t1, const uint32_t& t2) {
-                return cmpy(t1, t2);  // 调用成员函数
+                return cmpy(t1, t2);  
                 });
             if (axis == 2) std::sort(triangles.begin() + l, triangles.begin() + r + 1, [this](const uint32_t& t1, const uint32_t& t2) {
-                return cmpz(t1, t2);  // 调用成员函数
+                return cmpz(t1, t2);  
                 });
             // leftMax[i]: [l, i] 中最大的 xyz 值
             // leftMin[i]: [l, i] 中最小的 xyz 值
@@ -1433,18 +1305,6 @@ private:
         descPoolInfo.poolSizeCount = 2;
         descPoolInfo.pPoolSizes = descPoolSizes.data();
 
-        /*std::array<VkDescriptorPoolSize, 2> poolSizes{};
-        poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
-        poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);*/
-
-        /*VkDescriptorPoolCreateInfo poolInfo{};
-        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
-        poolInfo.pPoolSizes = poolSizes.data();
-        poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);*/
-
         if (vkCreateDescriptorPool(device, &descPoolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
             throw std::runtime_error("failed to create descriptor pool!");
         }
@@ -1488,11 +1348,6 @@ private:
         changeImgBufferInfo.imageView = changeImageView;
         changeImgBufferInfo.sampler = changSampler;
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            /*VkDescriptorImageInfo imageInfo{};
-            imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            imageInfo.imageView = textureImageView;
-            imageInfo.sampler = textureSampler;*/
-
             std::array<VkWriteDescriptorSet, 5> descriptorWrites{};
 
             for (int j = 0; j < 5; ++j) {
@@ -1504,6 +1359,7 @@ private:
                 descriptorWrites[j].descriptorCount = 1;
             }
             descriptorWrites[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+
             descriptorWrites[0].pBufferInfo = &vertexBufferInfo;
             descriptorWrites[1].pBufferInfo = &indexBufferInfo;
             descriptorWrites[2].pBufferInfo = &triangleBufferInfo;
@@ -1626,7 +1482,6 @@ private:
 
         std::array<VkClearValue, 2> clearValues{};
         clearValues[0].color = { {1.0f, 1.0f, 1.0f, 1.0f} };
-        //clearValues[1].color = { {1.0f, 1.0f, 1.0f, 1.0f} };
 
         renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
         renderPassInfo.pClearValues = clearValues.data();
@@ -1729,7 +1584,6 @@ private:
         else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
             throw std::runtime_error("failed to acquire swap chain image!");
         }
-        //updateUniformBuffer(currentFrame);
 
         vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
@@ -1872,7 +1726,7 @@ private:
 
         VkPhysicalDeviceFeatures supportedFeatures;
         vkGetPhysicalDeviceFeatures(device, &supportedFeatures);
-
+        //fragmentStoresAndAtomics:允许片段着色器直接向存储缓冲区或图像资源写入数据，且是线程安全的原子操作
         return indices.isComplete() && extensionsSupported && swapChainAdequate && supportedFeatures.samplerAnisotropy&&supportedFeatures.fragmentStoresAndAtomics;
     }
 
