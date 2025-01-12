@@ -129,7 +129,7 @@ Triangle getTriangle(int i) {
     t.p3 = vertices[indices[3*triangles[i]+2]].pos;
     
     t.color = vertices[indices[3*triangles[i]]].color;
-    t.emissive=vertices[indices[3*triangles[i]+2]].emissive;
+    t.emissive=vertices[indices[3*triangles[i]]].emissive;
     t.roughness=vertices[indices[3*triangles[i]+2]].roughness;
 
     return t;
@@ -171,7 +171,7 @@ HitResult hitBVH(Ray ray){
     res.emissive=false;
     res.isHit = false;
     res.distance = 100;
-    
+
     int stack[10000];
     int sp = 0;
     stack[sp++] = 0;
@@ -269,8 +269,8 @@ vec3 pathTracing(Ray ray,int maxBounce){
 void main()
 {
     Ray ray;
-    ray.startPoint = vec3(0, 0, 4);
-    vec3 dir = vec3(pix.x+(rand()-0.5)/800.0,pix.y+(rand()-0.5)/600,2)-ray.startPoint;
+    ray.startPoint = vec3(0, 0, 2);
+    vec3 dir = vec3(pix.x+(rand()-0.5)/800.0,pix.y+(rand()-0.5)/600,1)-ray.startPoint;
     //vec3 dir = vec3(pix.xy,2) - ray.startPoint;
     ray.direction = normalize(dir);
     vec3 color=vec3(0);

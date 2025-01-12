@@ -89,8 +89,8 @@ struct PushConstants {
 
 struct Vertex {
     alignas(16)glm::vec3 pos;
-    alignas(16)glm::vec3 color;
-    uint8_t emissive; float roughness=1.0;
+    alignas(16)glm::vec3 color = { 0,0,0 };
+    bool emissive; float roughness = 1.0;
 
     static VkVertexInputBindingDescription getBindingDescription() {
         VkVertexInputBindingDescription bindingDescription{};
@@ -199,6 +199,11 @@ private:
     VkDeviceMemory resourceBufferMemory;
     std::vector<void*> uniformBuffersMapped;
 
+    std::vector<Vertex> screenVertices;
+    std::vector<uint32_t> screenIndices;
+    VkBuffer screenTrianglesBuffer;
+    VkDeviceMemory screenTrianglesBufferMemory;
+
     VkDescriptorPool descriptorPool;
     std::vector<VkDescriptorSet> descriptorSets;
 
@@ -241,7 +246,7 @@ private:
         createChangeImgResources();
         createFramebuffers();
         loadModel();
-        createBVH(BVHNodes,0,triangles.size()-3,1);
+        createBVH(BVHNodes,0,triangles.size()-1,1);
         createResourceBuffer();
         createDescriptorPool();
         createDescriptorSets();
@@ -1004,6 +1009,14 @@ private:
         std::vector<tinyobj::material_t> materials;
         std::string warn, err;
 
+        Vertex vertex{};
+        vertex.pos = { -1,1,0.5 }; screenVertices.push_back(vertex);
+        vertex.pos = { 1,1,0.5 }; screenVertices.push_back(vertex);
+        vertex.pos = { 1,-1,0.5 }; screenVertices.push_back(vertex);
+        vertex.pos = { -1,-1,0.5 }; screenVertices.push_back(vertex);
+
+        screenIndices = { 0,1,2,0,2,3 };
+
         if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, MODEL_PATH.c_str())) {
             throw std::runtime_error(warn + err);
         }
@@ -1015,9 +1028,9 @@ private:
                 Vertex vertex{};
 
                 vertex.pos = {
-                    attrib.vertices[3 * index.vertex_index + 0]*10+0.3,
-                    attrib.vertices[3 * index.vertex_index + 1]*10-1,
-                    attrib.vertices[3 * index.vertex_index + 2]*10+0.7
+                    attrib.vertices[3 * index.vertex_index + 0] * 6 + 0.2,
+                    attrib.vertices[3 * index.vertex_index + 1] * 6 - 1,
+                    attrib.vertices[3 * index.vertex_index + 2] * 6
                 };
 
                 /*vertex.norm = {
@@ -1025,9 +1038,8 @@ private:
                     attrib.normals[3 * index.normal_index + 1],
                     attrib.normals[3 * index.normal_index + 2],
                 };*/
-                vertex.color = { 0.6,0.6,0.6 };
-                vertex.emissive = false;
-                vertex.roughness = 1;
+                vertex.color = { 1,0.6,0.8 };
+                vertex.roughness = 0.5;
                 /*vertex.texCoord = {
                     attrib.texcoords[2 * index.texcoord_index + 0],
                     1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
@@ -1042,59 +1054,52 @@ private:
             }
         }
         uint32_t index = vertices.size();
-        Vertex vertex{};
-        vertex.pos = { 1,-1,2 }; vertex.color = { 1,1,1 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { -1,-1,0 }; vertex.color = { 1,1,1 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { -1,-1,2 };vertex.color = { 1,1,1 };vertex.emissive = false;vertices.push_back(vertex);
-        vertex.pos = { 1,-1,2 }; vertex.color = { 1,1,1 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { 1,-1,0 }; vertex.color = { 1,1,1 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { -1,-1,0 }; vertex.color = { 1,1,1 }; vertex.emissive = false; vertices.push_back(vertex);
+        vertex.pos = { 1,-1,1 }; vertex.color = { 1,1,1 }; vertices.push_back(vertex);
+        vertex.pos = { -1,-1,-1 }; vertex.color = { 1,1,1 }; vertices.push_back(vertex);
+        vertex.pos = { -1,-1,1 };vertex.color = { 1,1,1 };vertices.push_back(vertex);
+        vertex.pos = { 1,-1,1 }; vertex.color = { 1,1,1 }; vertices.push_back(vertex);
+        vertex.pos = { 1,-1,-1 }; vertex.color = { 1,1,1 };  vertices.push_back(vertex);
+        vertex.pos = { -1,-1,-1 }; vertex.color = { 1,1,1 };  vertices.push_back(vertex);
 
-        vertex.pos = { 1,1,2 }; vertex.color = { 1,1,1 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { -1,1,0 }; vertex.color = { 1,1,1 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { -1,1,2 }; vertex.color = { 1,1,1 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { 1,1,2 }; vertex.color = { 1,1,1 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { 1,1,0 }; vertex.color = { 1,1,1 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { -1,1,0 }; vertex.color = { 1,1,1 }; vertex.emissive = false; vertices.push_back(vertex);
+        vertex.pos = { 1,1,1 }; vertex.color = { 1,1,1 }; vertices.push_back(vertex);
+        vertex.pos = { -1,1,-1 }; vertex.color = { 1,1,1 }; vertices.push_back(vertex);
+        vertex.pos = { -1,1,1 }; vertex.color = { 1,1,1 };  vertices.push_back(vertex);
+        vertex.pos = { 1,1,1 }; vertex.color = { 1,1,1 }; vertices.push_back(vertex);
+        vertex.pos = { 1,1,-1 }; vertex.color = { 1,1,1 }; vertices.push_back(vertex);
+        vertex.pos = { -1,1,-1 }; vertex.color = { 1,1,1 };  vertices.push_back(vertex);
 
-        vertex.pos = { -1,1,0 }; vertex.color = { 1,0.5,0.5 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { 1,1,0 }; vertex.color = { 1,0.5,0.5 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { 1,-1,0 }; vertex.color = { 1,0.5,0.5 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { 1,-1,0 }; vertex.color = { 1,0.5,0.5 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { -1,-1,0 }; vertex.color = { 1,0.5,0.5 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { -1,1,0 }; vertex.color = { 1,0.5,0.5 }; vertex.emissive = false; vertices.push_back(vertex);
+        vertex.pos = { -1,1,-1 }; vertex.color = { 1,0.5,0.5 };  vertices.push_back(vertex);
+        vertex.pos = { 1,1,-1 }; vertex.color = { 1,0.5,0.5 }; vertices.push_back(vertex);
+        vertex.pos = { 1,-1,-1 }; vertex.color = { 1,0.5,0.5 }; vertices.push_back(vertex);
+        vertex.pos = { 1,-1,-1 }; vertex.color = { 1,0.5,0.5 }; vertices.push_back(vertex);
+        vertex.pos = { -1,-1,-1 }; vertex.color = { 1,0.5,0.5 }; vertices.push_back(vertex);
+        vertex.pos = { -1,1,-1 }; vertex.color = { 1,0.5,0.5 }; vertices.push_back(vertex);
 
-        vertex.pos = { -1,1,2 }; vertex.color = { 0.5,0.5,1 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { -1,1,0 }; vertex.color = { 0.5,0.5,1 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { -1,-1,0 }; vertex.color = { 0.5,0.5,1 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { -1,-1,0 }; vertex.color = { 0.5,0.5,1 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { -1,-1,2 }; vertex.color = { 0.5,0.5,1 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { -1,1,2 }; vertex.color = { 0.5,0.5,1 }; vertex.emissive = false; vertices.push_back(vertex);
+        vertex.pos = { -1,1,1 }; vertex.color = { 0.5,0.5,1 }; vertices.push_back(vertex);
+        vertex.pos = { -1,1,-1 }; vertex.color = { 0.5,0.5,1 };  vertices.push_back(vertex);
+        vertex.pos = { -1,-1,-1 }; vertex.color = { 0.5,0.5,1 };  vertices.push_back(vertex);
+        vertex.pos = { -1,-1,-1 }; vertex.color = { 0.5,0.5,1 }; vertices.push_back(vertex);
+        vertex.pos = { -1,-1,1 }; vertex.color = { 0.5,0.5,1 }; vertices.push_back(vertex);
+        vertex.pos = { -1,1,1 }; vertex.color = { 0.5,0.5,1 }; vertices.push_back(vertex);
 
-        vertex.pos = { 1,1,2 }; vertex.color = { 0,1,1 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { 1,1,0 }; vertex.color = { 0,1,1 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { 1,-1,0 }; vertex.color = { 0,1,1 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { 1,-1,0 }; vertex.color = { 0,1,1 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { 1,-1,2 }; vertex.color = { 0,1,1 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { 1,1,2 }; vertex.color = { 0,1,1 }; vertex.emissive = false; vertices.push_back(vertex);
+        vertex.pos = { 1,1,1 }; vertex.color = { 0,1,1 }; vertices.push_back(vertex);
+        vertex.pos = { 1,1,-1 }; vertex.color = { 0,1,1 }; vertices.push_back(vertex);
+        vertex.pos = { 1,-1,-1 }; vertex.color = { 0,1,1 };vertices.push_back(vertex);
+        vertex.pos = { 1,-1,-1 }; vertex.color = { 0,1,1 }; vertices.push_back(vertex);
+        vertex.pos = { 1,-1,1 }; vertex.color = { 0,1,1 }; vertices.push_back(vertex);
+        vertex.pos = { 1,1,1 }; vertex.color = { 0,1,1 };vertices.push_back(vertex);
 
-        vertex.pos = { 0.4,0.99,1.4 }; vertex.color = { 1,1,1 }; vertex.emissive = true; vertices.push_back(vertex);
-        vertex.pos = { -0.4,0.99,0.6 }; vertex.color = { 1,1,1 }; vertex.emissive = true; vertices.push_back(vertex);
-        vertex.pos = { -0.4,0.99,1.4 }; vertex.color = { 1,1,1 }; vertex.emissive = true; vertices.push_back(vertex);
-        vertex.pos = { 0.4,0.99,1.4 }; vertex.color = { 1,1,1 }; vertex.emissive = true; vertices.push_back(vertex);
-        vertex.pos = { 0.4,0.99,0.6 }; vertex.color = { 1,1,1 }; vertex.emissive = true; vertices.push_back(vertex);
-        vertex.pos = { -0.4,0.99,0.6 }; vertex.color = { 1,1,1 }; vertex.emissive = true; vertices.push_back(vertex);
-        //只传给着色器，不用于构建bvh
-        vertex.pos = { -1,1,2.99 }; vertex.color = { 1,0.5,0.5 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { 1,1,2.99 }; vertex.color = { 1,0.5,0.5 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { 1,-1,2.99 }; vertex.color = { 1,0.5,0.5 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { 1,-1,2.99 }; vertex.color = { 1,0.5,0.5 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { -1,-1,2.99 }; vertex.color = { 1,0.5,0.5 }; vertex.emissive = false; vertices.push_back(vertex);
-        vertex.pos = { -1,1,2.99 }; vertex.color = { 1,0.5,0.5 }; vertex.emissive = false; vertices.push_back(vertex);
+        vertex.pos = { 0.4,0.99,0.4 }; vertex.color = { 1,1,1 }; vertex.emissive = true; vertices.push_back(vertex);
+        vertex.pos = { -0.4,0.99,-0.4 }; vertex.color = { 1,1,1 }; vertex.emissive = true; vertices.push_back(vertex);
+        vertex.pos = { -0.4,0.99,0.4 }; vertex.color = { 1,1,1 }; vertex.emissive = true; vertices.push_back(vertex);
+        vertex.pos = { 0.4,0.99,0.4 }; vertex.color = { 1,1,1 }; vertex.emissive = true; vertices.push_back(vertex);
+        vertex.pos = { 0.4,0.99,-0.4 }; vertex.color = { 1,1,1 }; vertex.emissive = true; vertices.push_back(vertex);
+        vertex.pos = { -0.4,0.99,-0.4 }; vertex.color = { 1,1,1 }; vertex.emissive = true; vertices.push_back(vertex);
+        
 
         std::vector<uint32_t> v = { index,index + 1,index + 2,index + 3,index + 4,index + 5 ,index + 6,index + 7,index + 8 ,index + 9,index + 10,index + 11,
         index + 12,index + 13,index + 14 ,index + 15,index + 16,index + 17 ,index + 18,index + 19,index + 20 ,index + 21,index + 22,index + 23 ,
-        index + 24,index + 25,index + 26 ,index + 27,index + 28,index + 29 ,index + 30,index + 31,index + 32 ,index + 33,index + 34,index + 35,index + 36,index + 37,index + 38,index + 39,index + 40,index + 41 };
+        index + 24,index + 25,index + 26 ,index + 27,index + 28,index + 29 ,index + 30,index + 31,index + 32 ,index + 33,index + 34,index + 35 };
         indices.insert(indices.end(), v.begin(), v.end());
         for (int i = 0; i < indices.size(); i += 3)
             triangles.push_back(i / 3);
@@ -1291,6 +1296,27 @@ private:
 
         vkDestroyBuffer(device, stagingBuffer, nullptr);
         vkFreeMemory(device, stagingBufferMemory, nullptr);
+        //传递给顶点着色器的点数据
+        VkDeviceSize screenTrianglesBufferSize = sizeof(Vertex) * screenVertices.size() + sizeof(uint32_t) * screenIndices.size();
+        VkBuffer screenStagingBuffer;
+        VkDeviceMemory screenStagingBufferMemory;
+        createBuffer(screenTrianglesBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, screenStagingBuffer, screenStagingBufferMemory);
+
+        void* screenData;
+        vkMapMemory(device, screenStagingBufferMemory, 0, screenTrianglesBufferSize, 0, &screenData);
+        memcpy(screenData, screenVertices.data(), (size_t)sizeof(Vertex) * screenVertices.size());
+        screenData = (void*)((char*)screenData + sizeof(Vertex) * screenVertices.size());
+        memcpy(screenData, screenIndices.data(), (size_t)sizeof(uint32_t) * screenIndices.size());
+
+        vkUnmapMemory(device, screenStagingBufferMemory);
+
+        createBuffer(screenTrianglesBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, screenTrianglesBuffer, screenTrianglesBufferMemory);
+
+        copyBuffer(screenStagingBuffer, screenTrianglesBuffer, screenTrianglesBufferSize);
+
+        vkDestroyBuffer(device, screenStagingBuffer, nullptr);
+        vkFreeMemory(device, screenStagingBufferMemory, nullptr);
+
     }
 
     void createDescriptorPool() {
@@ -1505,9 +1531,9 @@ private:
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
         VkDeviceSize offsets[] = { 0 };
-        vkCmdBindVertexBuffers(commandBuffer, 0, 1, &resourceBuffer, offsets);
+        vkCmdBindVertexBuffers(commandBuffer, 0, 1, &screenTrianglesBuffer, offsets);
 
-        vkCmdBindIndexBuffer(commandBuffer, resourceBuffer,sizeof(Vertex)*vertices.size(),  VK_INDEX_TYPE_UINT32);
+        vkCmdBindIndexBuffer(commandBuffer, screenTrianglesBuffer,sizeof(Vertex)*screenVertices.size(),  VK_INDEX_TYPE_UINT32);
 
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
 
@@ -1517,7 +1543,7 @@ private:
         // 在命令缓冲区中推送常量
         vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pushConstants);
 
-        vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+        vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(screenIndices.size()), 1, 0, 0, 0);
 
         vkCmdEndRenderPass(commandBuffer);
 
