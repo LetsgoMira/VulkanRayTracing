@@ -2,12 +2,13 @@
 layout(push_constant) uniform PushConstants {
     int frameCounter;
 };
+
 layout(location = 0) in vec3 pix;
 
 layout(location = 0) out vec4 changeColor;
 layout(location = 1) out vec4 fragColor;
 
-#define PI              3.1415926
+#define PI 3.1415926535
 
 struct vertex{
     vec3 pos;
@@ -17,9 +18,9 @@ struct vertex{
 };
 
 struct BVHNode {
-    int left, right;    // 左右子树索引
-    int n, index;       // 叶子节点信息
-    vec3 AA, BB;        // 碰撞盒
+    int left, right;    
+    int n, index;      
+    vec3 AA, BB;       
 };
 
 layout(binding = 0) buffer vertexBuffer {
@@ -35,26 +36,27 @@ layout(binding = 3) buffer BVHBuffer {
     BVHNode BVHNodes[]; 
 };
 layout(binding = 4) uniform sampler2D changeSampler;
+
 struct Ray {
     vec3 startPoint;
     vec3 direction;
 };
 
 struct Triangle {
-    vec3 p1, p2, p3;    // 顶点坐标
-    vec3 color;    // 顶点颜色
+    vec3 p1, p2, p3;   
+    vec3 color;    
     bool emissive;
     float roughness;
 };
 
-// 光线求交结果
+
 struct HitResult {
-    bool isHit;             // 是否命中
-    bool isInside;          // 是否从内部命中
-    float distance;         // 与交点的距离
-    vec3 hitPoint;          // 光线命中点
-    vec3 normal;            // 命中点法线
-    vec3 viewDir;           // 击中该点的光线的方向
+    bool isHit;             
+    bool isInside;//内部击中
+    float distance;
+    vec3 hitPoint;
+    vec3 normal;
+    vec3 viewDir;//击中此点的光线方向          
     vec3 color;
     bool emissive;
     float roughness;
@@ -122,7 +124,6 @@ HitResult hitTriangle(Triangle triangle, Ray ray) {
 Triangle getTriangle(int i) {
     Triangle t;
 
-    // 顶点坐标
     t.p1 = vertices[indices[3*triangles[i]]].pos;
     t.p2 = vertices[indices[3*triangles[i]+1]].pos;
     t.p3 = vertices[indices[3*triangles[i]+2]].pos;
@@ -134,7 +135,7 @@ Triangle getTriangle(int i) {
     return t;
 }
 
-// 暴力遍历数组下标范围 [l, r] 求最近交点
+
 HitResult hitArray(Ray ray, int l, int r) {
     HitResult res;
     res.isHit = false;
@@ -170,7 +171,7 @@ HitResult hitBVH(Ray ray){
     res.emissive=false;
     res.isHit = false;
     res.distance = 100;
-    // 栈
+    
     int stack[10000];
     int sp = 0;
     stack[sp++] = 0;
