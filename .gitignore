@@ -361,3 +361,9 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+# Generated shaders (compile manually when requested)
+shaders/pathtrace.*.spv
+shaders/pathtrace.*.spv.tmp
+
+# Wavefront OBJ assets are source data, not compiler object files.
+!models/**/*.obj

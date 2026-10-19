@@ -1,284 +1,217 @@
-#version 440
+#version 450
+
 layout(push_constant) uniform PushConstants {
-    int frameCounter;
+    uint sampleCount;
+    uint width;
+    uint height;
+    uint encodeSrgb;
+    uint frameSeed;
 };
-
-layout(location = 0) in vec3 pix;
-
-layout(location = 0) out vec4 changeColor;
+layout(location = 0) out vec4 historyColor;
 layout(location = 1) out vec4 fragColor;
 
-#define PI 3.1415926535
+const float PI = 3.14159265358979323846;
+const float FAR_DISTANCE = 1.0e30;
+const float RAY_MIN_T = 1.0e-5;
+const int STACK_CAPACITY = 64; // CPU builder caps depth at 48.
+const int MAX_BOUNCES = 8;
 
-struct vertex{
+// std430: pos=0, color=16, emissive=28, roughness=32, stride=48.
+struct Vertex {
     vec3 pos;
     vec3 color;
-    bool emissive;
+    uint emissive;
     float roughness;
 };
-
+// std430: four ints=0..15, AA=16, BB=32, stride=48.
 struct BVHNode {
-    int left, right;    
-    int n, index;      
-    vec3 AA, BB;       
+    int left;
+    int right;
+    int n;
+    int index;
+    vec3 AA;
+    vec3 BB;
 };
+layout(std430, binding = 0) readonly buffer VertexBuffer { Vertex vertices[]; };
+layout(std430, binding = 1) readonly buffer IndexBuffer { uint indices[]; };
+layout(std430, binding = 2) readonly buffer TriangleBuffer { uint triangles[]; };
+layout(std430, binding = 3) readonly buffer BVHBuffer { BVHNode BVHNodes[]; };
+layout(binding = 4) uniform sampler2D historySampler;
 
-layout(binding = 0) buffer vertexBuffer {
-    vertex vertices[]; 
-};
-layout(binding = 1) buffer indexBuffer {
-    uint indices[]; 
-};
-layout(binding = 2) buffer triangleBuffer {
-    uint triangles[]; 
-};
-layout(binding = 3) buffer BVHBuffer {
-    BVHNode BVHNodes[]; 
-};
-layout(binding = 4) uniform sampler2D changeSampler;
-
-struct Ray {
-    vec3 startPoint;
-    vec3 direction;
-};
-
-struct Triangle {
-    vec3 p1, p2, p3;   
-    vec3 color;    
-    bool emissive;
-    float roughness;
-};
-
-
-struct HitResult {
-    bool isHit;             
-    bool isInside;//内部击中
+struct Ray { vec3 origin; vec3 direction; };
+struct Hit {
+    bool found;
     float distance;
-    vec3 hitPoint;
+    vec3 position;
     vec3 normal;
-    vec3 viewDir;//击中此点的光线方向          
     vec3 color;
-    bool emissive;
+    uint emissive;
     float roughness;
 };
 
-// 光线和三角形求交 
-HitResult hitTriangle(Triangle triangle, Ray ray) {
-    HitResult res;
-    res.distance = 100;
-    res.isHit = false;
-    res.isInside = false;
-    res.emissive=false;
-
-    vec3 p1 = triangle.p1;
-    vec3 p2 = triangle.p2;
-    vec3 p3 = triangle.p3;
-
-    vec3 S = ray.startPoint;    // 射线起点
-    vec3 d = ray.direction;     // 射线方向
-    vec3 N = normalize(cross(p2-p1, p3-p1));    // 法向量
-
-    // 从三角形背后（模型内部）击中
-    if (dot(N, d) > 0.0f) {
-        N = -N;   
-        res.isInside = true;
-    }
-
-    // 如果视线和三角形平行
-    if (abs(dot(N, d)) < 0.00001f) return res;
-
-    // 距离
-    float t = (dot(N, p1) - dot(S, N)) / dot(d, N);
-    if (t < 0.0005f) return res;    // 如果三角形在光线背面
-
-    // 交点计算
-    vec3 P = S + d * t;
-
-    // 判断交点是否在三角形中
-    vec3 c1 = cross(p2 - p1, P - p1);
-    vec3 c2 = cross(p3 - p2, P - p2);
-    vec3 c3 = cross(p1 - p3, P - p3);
-    bool r1 = (dot(c1, N) > 0 && dot(c2, N) > 0 && dot(c3, N) > 0);
-    bool r2 = (dot(c1, N) < 0 && dot(c2, N) < 0 && dot(c3, N) < 0);
-
-    // 命中，封装返回结果
-    if (r1 || r2) {
-        res.roughness=triangle.roughness;
-        res.color=triangle.color;
-        res.emissive=triangle.emissive;
-        res.isHit = true;
-        res.hitPoint = P;
-        res.distance = t;
-        res.normal = N;
-        res.viewDir = d;
-        // 根据交点位置插值顶点法线
-        float alpha = (-(P.x-p2.x)*(p3.y-p2.y) + (P.y-p2.y)*(p3.x-p2.x)) / (-(p1.x-p2.x-0.00005)*(p3.y-p2.y+0.00005) + (p1.y-p2.y+0.00005)*(p3.x-p2.x+0.00005));
-        float beta  = (-(P.x-p3.x)*(p1.y-p3.y) + (P.y-p3.y)*(p1.x-p3.x)) / (-(p2.x-p3.x-0.00005)*(p1.y-p3.y+0.00005) + (p2.y-p3.y+0.00005)*(p1.x-p3.x+0.00005));
-        float gama  = 1.0 - alpha - beta;
-        res.normal = N;
-    }
-
-    return res;
+Hit miss(float maxDistance) {
+    return Hit(false, maxDistance, vec3(0), vec3(0), vec3(0), 0u, 1.0);
 }
 
-Triangle getTriangle(int i) {
-    Triangle t;
+Hit hitTriangle(uint triangleId, Ray ray, float maxDistance) {
+    Vertex a = vertices[indices[3u * triangleId]];
+    Vertex b = vertices[indices[3u * triangleId + 1u]];
+    Vertex c = vertices[indices[3u * triangleId + 2u]];
+    vec3 edge1 = b.pos - a.pos;
+    vec3 edge2 = c.pos - a.pos;
+    vec3 normal = cross(edge1, edge2);
+    float normalLength = length(normal);
+    Hit result = miss(maxDistance);
+    if (normalLength <= 1.0e-20) return result;
 
-    t.p1 = vertices[indices[3*triangles[i]]].pos;
-    t.p2 = vertices[indices[3*triangles[i]+1]].pos;
-    t.p3 = vertices[indices[3*triangles[i]+2]].pos;
-    
-    t.color = vertices[indices[3*triangles[i]]].color;
-    t.emissive=vertices[indices[3*triangles[i]]].emissive;
-    t.roughness=vertices[indices[3*triangles[i]+2]].roughness;
+    // Two-sided Moller-Trumbore; inclusive barycentric edges.
+    vec3 p = cross(ray.direction, edge2);
+    float determinant = dot(edge1, p);
+    if (abs(determinant) <= 1.0e-8 * normalLength) return result;
+    float inverse = 1.0 / determinant;
+    vec3 fromA = ray.origin - a.pos;
+    float u = dot(fromA, p) * inverse;
+    if (u < 0.0 || u > 1.0) return result;
+    vec3 q = cross(fromA, edge1);
+    float v = dot(ray.direction, q) * inverse;
+    if (v < 0.0 || u + v > 1.0) return result;
+    float t = dot(edge2, q) * inverse;
+    if (t <= RAY_MIN_T || t >= maxDistance) return result;
 
-    return t;
+    normal /= normalLength;
+    if (dot(normal, ray.direction) > 0.0) normal = -normal;
+    return Hit(true, t, ray.origin + t * ray.direction, normal, a.color, a.emissive, a.roughness);
 }
 
-
-HitResult hitArray(Ray ray, int l, int r) {
-    HitResult res;
-    res.isHit = false;
-    res.emissive=false;
-    res.distance = 100;
-    for(int i=l; i<=r; i++) {
-        Triangle triangle = getTriangle(i);
-        HitResult r = hitTriangle(triangle, ray);
-        if(r.isHit && r.distance<res.distance) {
-            res = r;
+float hitAABB(Ray ray, vec3 lower, vec3 upper, float maxDistance) {
+    float nearT = 0.0;
+    float farT = maxDistance;
+    for (int axis = 0; axis < 3; ++axis) {
+        // A parallel ray on a slab boundary must not produce 0 * infinity (NaN).
+        if (ray.direction[axis] == 0.0) {
+            if (ray.origin[axis] < lower[axis] || ray.origin[axis] > upper[axis]) return -1.0;
+        } else {
+            float t0 = (lower[axis] - ray.origin[axis]) / ray.direction[axis];
+            float t1 = (upper[axis] - ray.origin[axis]) / ray.direction[axis];
+            nearT = max(nearT, min(t0, t1));
+            farT = min(farT, max(t0, t1));
+            if (nearT > farT) return -1.0;
         }
     }
-    return res;
+    // Return zero for origins inside/on the box; zero is a valid hit.
+    return nearT;
 }
 
-float hitAABB(Ray r,vec3 AA,vec3 BB){
-    vec3 invdir = 1.0 / r.direction;
-
-    vec3 f = (BB - r.startPoint) * invdir;
-    vec3 n = (AA - r.startPoint) * invdir;
-
-    vec3 tmax = max(f, n);
-    vec3 tmin = min(f, n);
-
-    float t1 = min(tmax.x, min(tmax.y, tmax.z));
-    float t0 = max(tmin.x, max(tmin.y, tmin.z));
-
-    return (t1 >= t0) ? ((t0 > 0.0) ? (t0) : (t1)) : (-1);
+Hit hitArray(Ray ray, int first, int count, float maxDistance) {
+    Hit closest = miss(maxDistance);
+    for (int i = first; i < first + count; ++i) {
+        Hit candidate = hitTriangle(triangles[i], ray, closest.distance);
+        if (candidate.found) closest = candidate;
+    }
+    return closest;
 }
 
-HitResult hitBVH(Ray ray){
-    HitResult res;
-    res.emissive=false;
-    res.isHit = false;
-    res.distance = 100;
-
-    int stack[10000];
+Hit hitBVH(Ray ray) {
+    Hit closest = miss(FAR_DISTANCE);
+    int stack[STACK_CAPACITY];
     int sp = 0;
     stack[sp++] = 0;
-    while(sp>0){
-        int top=stack[--sp];
-        BVHNode node=BVHNodes[top];
-        if(node.n>0){
-            int L=node.index;
-            int R=L+node.n-1;
-            HitResult r=hitArray(ray,L,R);
-            if(r.isHit && r.distance<res.distance) res = r;
+    while (sp > 0) {
+        BVHNode node = BVHNodes[stack[--sp]];
+        if (hitAABB(ray, node.AA, node.BB, closest.distance) < 0.0) continue;
+        if (node.n > 0) {
+            Hit candidate = hitArray(ray, node.index, node.n, closest.distance);
+            if (candidate.found) closest = candidate;
             continue;
         }
-        float d1 = 0; // 左盒子距离
-        float d2 = 0; // 右盒子距离
-        if(node.left>0) {
-            BVHNode leftNode = BVHNodes[node.left];
-            d1 = hitAABB(ray, leftNode.AA, leftNode.BB);
-        }
-        if(node.right>0) {
-            BVHNode rightNode = BVHNodes[node.right];
-            d2 = hitAABB(ray, rightNode.AA, rightNode.BB);
-        }
-        // 在最近的盒子中搜索
-        if(d1>0 && d2>0) {
-            if(d1<d2) { // d1<d2, 左边先
-                stack[sp++] = node.right;
-                stack[sp++] = node.left;
-            } else {    // d2<d1, 右边先
-                stack[sp++] = node.left;
-                stack[sp++] = node.right;
-            }
-        } else if(d1>0) {   // 仅命中左边
-            stack[sp++] = node.left;
-        } else if(d2>0) {   // 仅命中右边
-            stack[sp++] = node.right;
+        float leftT = hitAABB(ray, BVHNodes[node.left].AA, BVHNodes[node.left].BB, closest.distance);
+        float rightT = hitAABB(ray, BVHNodes[node.right].AA, BVHNodes[node.right].BB, closest.distance);
+        if (leftT >= 0.0 && rightT >= 0.0) {
+            // Defensive fallback if a future builder violates the depth contract.
+            if (sp + 2 > STACK_CAPACITY) return hitArray(ray, 0, triangles.length(), FAR_DISTANCE);
+            stack[sp++] = leftT <= rightT ? node.right : node.left;
+            stack[sp++] = leftT <= rightT ? node.left : node.right;
+        } else if (leftT >= 0.0 || rightT >= 0.0) {
+            if (sp + 1 > STACK_CAPACITY) return hitArray(ray, 0, triangles.length(), FAR_DISTANCE);
+            stack[sp++] = leftT >= 0.0 ? node.left : node.right;
         }
     }
-    return res;
+    return closest;
 }
 
-uint seed = uint(
-    uint((pix.x * 0.5 + 0.5) * 800)  * uint(1973) + 
-    uint((pix.y * 0.5 + 0.5) * 600) * uint(9277) + 
-    uint(frameCounter) * uint(26699)) | uint(1);
-
-uint wang_hash(inout uint seed) {
-    seed = uint(seed ^ uint(61)) ^ uint(seed >> uint(16));
-    seed *= uint(9);
-    seed = seed ^ (seed >> 4);
-    seed *= uint(0x27d4eb2d);
-    seed = seed ^ (seed >> 15);
-    return seed;
+uint seed;
+uint wangHash(inout uint state) {
+    state = (state ^ 61u) ^ (state >> 16u);
+    state *= 9u;
+    state ^= state >> 4u;
+    state *= 0x27d4eb2du;
+    state ^= state >> 15u;
+    return state;
+}
+float randomFloat() {
+    // 24 significant bits: the float conversion can never round up to 1.0.
+    return float(wangHash(seed) >> 8u) * (1.0 / 16777216.0);
+}
+vec3 sampleCosineHemisphere(vec3 normal) {
+    float r = sqrt(randomFloat());
+    float phi = 2.0 * PI * randomFloat();
+    vec3 helper = abs(normal.x) > 0.9 ? vec3(0, 0, 1) : vec3(1, 0, 0);
+    vec3 tangent = normalize(cross(helper, normal));
+    vec3 bitangent = cross(normal, tangent);
+    return normalize(r * cos(phi) * tangent + r * sin(phi) * bitangent +
+        sqrt(max(0.0, 1.0 - r * r)) * normal);
 }
 
-float rand() {
-    return float(wang_hash(seed)) / 4294967296.0;
-}
-// 半球均匀采样
-vec3 SampleHemisphere() {
-    float z = rand();
-    float r = max(0, sqrt(1.0 - z*z));
-    float phi = 2.0 * PI * rand();
-    return vec3(r * cos(phi), r * sin(phi), z);
-}
+vec3 pathTrace(Ray ray) {
+    vec3 throughput = vec3(1.0);
+    for (int bounce = 0; bounce < MAX_BOUNCES; ++bounce) {
+        Hit hit = hitBVH(ray);
+        if (!hit.found) return vec3(0.0);
+        if (hit.emissive != 0u) return throughput * hit.color;
 
-// 将向量 v 投影到 N 的法向半球
-vec3 toNormalHemisphere(vec3 v, vec3 N) {
-    vec3 helper = vec3(1, 0, 0);
-    if(abs(N.x)>0.999) helper = vec3(0, 0, 1);
-    vec3 tangent = normalize(cross(N, helper));
-    vec3 bitangent = normalize(cross(N, tangent));
-    return v.x * tangent + v.y * bitangent + v.z * N;
-}
-
-vec3 pathTracing(Ray ray,int maxBounce){
-    vec3 history = vec3(1);
-    while(maxBounce-->0){
-        HitResult res=hitBVH(ray);
-        if(!res.isHit) return vec3(0);
-        if(res.emissive) return res.color*history;
-        vec3 ref=normalize(reflect(ray.direction,res.normal));
-        vec3 random = toNormalHemisphere(SampleHemisphere(), res.normal);
-        vec3 wi=mix(ref,random,res.roughness);
-        float pdf=1.0/(2.0*PI);
-        float cosine=max(0,dot(wi,res.normal));
-        vec3 f_r=res.color/PI;
-        history*=(f_r*cosine/pdf);
-        ray.startPoint=res.hitPoint;
-        ray.direction=wi;
+        // roughness is the diffuse mixture weight, NOT a GGX roughness.
+        // Choose a Lambertian lobe (pdf=cos/pi) or an ideal mirror lobe.
+        // The selection probability cancels the matching BSDF mixture weight.
+        float diffuseWeight = clamp(hit.roughness, 0.0, 1.0);
+        if (randomFloat() < diffuseWeight) {
+            ray.direction = sampleCosineHemisphere(hit.normal);
+        } else {
+            ray.direction = normalize(reflect(ray.direction, hit.normal));
+        }
+        throughput *= clamp(hit.color, vec3(0.0), vec3(1.0));
+        float scale = max(1.0, max(abs(hit.position.x), max(abs(hit.position.y), abs(hit.position.z))));
+        ray.origin = hit.position + hit.normal * (1.0e-4 * scale);
+        if (bounce >= 3) {
+            float survival = clamp(max(throughput.x, max(throughput.y, throughput.z)), 0.05, 0.95);
+            if (randomFloat() >= survival) return vec3(0.0);
+            throughput /= survival;
+        }
     }
-    return vec3(0);
+    return vec3(0.0);
 }
 
-void main()
-{
-    Ray ray;
-    ray.startPoint = vec3(0, 0, 2);
-    vec3 dir = vec3(pix.x+(rand()-0.5)/800.0,pix.y+(rand()-0.5)/600,1)-ray.startPoint;
-    //vec3 dir = vec3(pix.xy,2) - ray.startPoint;
-    ray.direction = normalize(dir);
-    vec3 color=vec3(0);
-    color=pathTracing(ray,3);
-    vec3 lastColor=texture(changeSampler,vec2(pix.x*0.5+0.5,0.5-pix.y*0.5)).rgb;
-    //color=mix(lastColor,color,1.0/float(frameCounter));
-    color=(lastColor*(frameCounter-1)+color)/float(frameCounter);
-    fragColor=vec4(color,1.0);
-    changeColor=vec4(color,1.0);
+vec3 linearToSrgb(vec3 value) {
+    return mix(1.055 * pow(value, vec3(1.0 / 2.4)) - 0.055,
+        12.92 * value, lessThanEqual(value, vec3(0.0031308)));
 }
 
+void main() {
+    ivec2 pixel = ivec2(gl_FragCoord.xy);
+    seed = (uint(pixel.x) * 1973u + uint(pixel.y) * 9277u + frameSeed * 26699u) | 1u;
+    vec2 jitter = vec2(randomFloat(), randomFloat()) - 0.5;
+    vec2 uv = (gl_FragCoord.xy + jitter) / vec2(width, height);
+    vec2 ndc = vec2(2.0 * uv.x - 1.0, 1.0 - 2.0 * uv.y);
+    ndc.x *= float(width) / float(height);
+    Ray ray = Ray(vec3(0, 0, 2), normalize(vec3(ndc, -1.0)));
+    vec3 sampleColor = pathTrace(ray);
+    vec3 average = sampleColor;
+    if (sampleCount > 1u) {
+        vec3 previous = texelFetch(historySampler, pixel, 0).rgb;
+        average = previous + (sampleColor - previous) / float(sampleCount);
+    }
+    // Keep linear HDR data in history; only the display output is clamped/encoded.
+    historyColor = vec4(average, 1.0);
+    vec3 displayColor = clamp(average, vec3(0.0), vec3(1.0));
+    if (encodeSrgb != 0u) displayColor = linearToSrgb(displayColor);
+    fragColor = vec4(displayColor, 1.0);
+}

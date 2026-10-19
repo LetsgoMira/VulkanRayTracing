@@ -1,0 +1,168 @@
+{
+  "date": "2026-10-19",
+  "upstream": "https://github.com/LetsgoMira/VulkanRayTracing",
+  "base_commit": "72dd23d544773eef4fc6801338d229fc75387870",
+  "upstream_archive_sha256": "6bc4523af05a581f0d72b04c7efaffa5450c1aef1e11edc849724e215e30aa28",
+  "verification_level": "source inspection only; no compilation or execution of the renderer",
+  "checks": [
+    {
+      "check": "balanced_delimiters:main.cpp",
+      "status": "passed",
+      "detail": "Lexical check only; not a syntax/type check."
+    },
+    {
+      "check": "balanced_delimiters:shaders/shader.frag",
+      "status": "passed",
+      "detail": "Lexical check only; not a syntax/type check."
+    },
+    {
+      "check": "balanced_delimiters:shaders/shader.vert",
+      "status": "passed",
+      "detail": "Lexical check only; not a syntax/type check."
+    },
+    {
+      "check": "push_constant_contract",
+      "status": "passed",
+      "detail": {
+        "cpu": [
+          [
+            "uint32_t",
+            "sampleCount"
+          ],
+          [
+            "uint32_t",
+            "width"
+          ],
+          [
+            "uint32_t",
+            "height"
+          ],
+          [
+            "uint32_t",
+            "encodeSrgb"
+          ],
+          [
+            "uint32_t",
+            "frameSeed"
+          ]
+        ],
+        "glsl": [
+          [
+            "uint",
+            "sampleCount"
+          ],
+          [
+            "uint",
+            "width"
+          ],
+          [
+            "uint",
+            "height"
+          ],
+          [
+            "uint",
+            "encodeSrgb"
+          ],
+          [
+            "uint",
+            "frameSeed"
+          ]
+        ],
+        "expected_bytes": 20
+      }
+    },
+    {
+      "check": "std430_layout:Vertex",
+      "status": "passed",
+      "detail": {
+        "offsets": {
+          "pos": 0,
+          "color": 16,
+          "emissive": 28,
+          "roughness": 32
+        },
+        "stride": 48,
+        "scope": "Calculated GLSL contract; C++ static_asserts are present but not compiled."
+      }
+    },
+    {
+      "check": "std430_layout:BVHNode",
+      "status": "passed",
+      "detail": {
+        "offsets": {
+          "left": 0,
+          "right": 4,
+          "n": 8,
+          "index": 12,
+          "AA": 16,
+          "BB": 32
+        },
+        "stride": 48,
+        "scope": "Calculated GLSL contract; C++ static_asserts are present but not compiled."
+      }
+    },
+    {
+      "check": "descriptor_binding_contract",
+      "status": "passed",
+      "detail": "Bindings 0..3 are read-only storage buffers; binding 4 is the history sampler."
+    },
+    {
+      "check": "bvh_depth_contract",
+      "status": "passed",
+      "detail": {
+        "cpu_depth": 48,
+        "dfs_max_pending_nodes": 49,
+        "shader_stack": 64
+      }
+    },
+    {
+      "check": "history_read_write_selection",
+      "status": "passed",
+      "detail": "Source indexing selects a different image for sampling and the color attachment; not a GPU synchronization test."
+    },
+    {
+      "check": "project_xml_and_paths",
+      "status": "passed",
+      "detail": "XML parsed; all four original configurations use dependency variables; x64 is the documented target."
+    },
+    {
+      "check": "shader_output_names",
+      "status": "passed",
+      "detail": "New SPIR-V names match the manual script and are absent, as required by the no-compilation instruction."
+    },
+    {
+      "check": "original_shader_binaries_preserved",
+      "status": "passed",
+      "detail": "Old binaries are byte-identical and are not loaded by the updated application."
+    }
+  ],
+  "modified_upstream_files": [
+    ".gitignore",
+    "README.md",
+    "VulkanLearn.vcxproj",
+    "main.cpp",
+    "shaders/compile.bat",
+    "shaders/shader.frag",
+    "shaders/shader.vert"
+  ],
+  "not_performed": [
+    "C++ compilation",
+    "GLSL/SPIR-V compilation or validation",
+    "GPU execution",
+    "Vulkan validation layers",
+    "runtime BVH invariant check",
+    "visual or performance comparison"
+  ],
+  "modified_file_sha256": {
+    ".gitignore": "94989af72aea5341bcc36a4b17ebcdd9888d33c0027670cb9c10287c77ae061b",
+    "README.md": "eee6122ab9566486568b6762f64bff38b5f870e2094a2f5d71b3a631709a32b8",
+    "VulkanLearn.vcxproj": "9e786339bdee4e5126ece560e1915a9db9e97ad2f8c73564219d98cad5c45f6a",
+    "main.cpp": "4488e7039afc369943f64374b3883151a51f589b05f3b62b0a920a48db6278ea",
+    "shaders/compile.bat": "c6fb0f41198ccf065f756dc06950acc80f627cc50f56d38ff7816b9f5c48b3ff",
+    "shaders/shader.frag": "b74af663dfced62567cf5b596a6de3013d6b6775f3984f26e0e20d4215d9417d",
+    "shaders/shader.vert": "2eaf12b880f52f76b23310e1170c42cfb914f01ec153a14ceed5181b5f71996d"
+  },
+  "new_files": [
+    "verification.json"
+  ]
+}
