@@ -367,3 +367,6 @@ shaders/pathtrace.*.spv.tmp
 
 # Wavefront OBJ assets are source data, not compiler object files.
 !models/**/*.obj
+
+# Local mesh preparation dependency; not required by the renderer.
+/.model-tools/

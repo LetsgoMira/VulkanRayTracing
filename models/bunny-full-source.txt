@@ -1,0 +1,9 @@
+Stanford Bunny (OBJ)
+Authors of original scan/reconstruction: Greg Turk and Marc Levoy, Stanford University.
+Original model information: https://graphics.stanford.edu/software/scanview/models/bunny.html
+OBJ source: https://github.com/alecjacobson/common-3d-test-models/blob/master/data/stanford-bunny.obj
+Downloaded: 2026-10-19
+Saved as: bunny.obj (unmodified)
+Vertices: 35947
+Triangles: 69451
+SHA256: 1EB35D1E21CE99E5CE911353B6BE278990713448DD9E8F5C9387F9DE39B32205

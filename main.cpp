@@ -101,8 +101,14 @@ struct PushConstants {
     uint32_t height;
     uint32_t encodeSrgb;
     uint32_t frameSeed;
+    alignas(16) glm::vec4 cameraOrigin;
+    glm::vec4 cameraRight;
+    glm::vec4 cameraUp;
+    glm::vec4 cameraForward;
 };
-static_assert(sizeof(PushConstants) == 20, "Push constant ABI mismatch");
+static_assert(sizeof(PushConstants) == 96 && offsetof(PushConstants, cameraOrigin) == 32 &&
+    offsetof(PushConstants, cameraRight) == 48 && offsetof(PushConstants, cameraUp) == 64 &&
+    offsetof(PushConstants, cameraForward) == 80, "Push constant ABI mismatch");
 
 struct Vertex {
     alignas(16)glm::vec3 pos;
@@ -215,6 +221,14 @@ private:
     uint32_t currentFrame = 0;
 
     bool framebufferResized = false;
+    // Orbit around the room center; the initial pose matches the original camera.
+    glm::vec3 cameraTarget{0.0f, 0.0f, 0.0f};
+    float cameraYaw = 0.0f;
+    float cameraPitch = 0.0f;
+    float cameraDistance = 2.0f;
+    bool cameraDragging = false;
+    double lastCursorX = 0.0;
+    double lastCursorY = 0.0;
 
     void initWindow() {
         if (glfwInit() != GLFW_TRUE) throw std::runtime_error("GLFW initialization failed");
@@ -226,6 +240,63 @@ private:
         if (!window) throw std::runtime_error("Window creation failed");
         glfwSetWindowUserPointer(window, this);
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
+        glfwSetMouseButtonCallback(window, mouseButtonCallback);
+        glfwSetCursorPosCallback(window, cursorPositionCallback);
+        glfwSetScrollCallback(window, scrollCallback);
+        glfwSetWindowFocusCallback(window, windowFocusCallback);
+        glfwSetKeyCallback(window, keyCallback);
+    }
+
+    static void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+        if (key != GLFW_KEY_R || action != GLFW_PRESS) return;
+        auto app = static_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+        app->cameraYaw = 0.0f;
+        app->cameraPitch = 0.0f;
+        app->cameraDistance = 2.0f;
+        app->sampleCount = 0;
+    }
+
+    static void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
+        if (button != GLFW_MOUSE_BUTTON_LEFT) return;
+        auto app = static_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+        app->cameraDragging = action == GLFW_PRESS;
+        glfwGetCursorPos(window, &app->lastCursorX, &app->lastCursorY);
+    }
+
+    static void windowFocusCallback(GLFWwindow* window, int focused) {
+        if (!focused) {
+            auto app = static_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+            app->cameraDragging = false;
+        }
+    }
+
+    static void cursorPositionCallback(GLFWwindow* window, double x, double y) {
+        auto app = static_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+        const double dx = x - app->lastCursorX;
+        const double dy = y - app->lastCursorY;
+        app->lastCursorX = x;
+        app->lastCursorY = y;
+        if (!app->cameraDragging || (dx == 0.0 && dy == 0.0)) return;
+        const float yaw = std::remainder(app->cameraYaw - static_cast<float>(dx) * 0.005f,
+            glm::radians(360.0f));
+        const float pitch = std::clamp(app->cameraPitch + static_cast<float>(dy) * 0.005f,
+            glm::radians(-89.0f), glm::radians(89.0f));
+        if (yaw != app->cameraYaw || pitch != app->cameraPitch) {
+            app->cameraYaw = yaw;
+            app->cameraPitch = pitch;
+            app->sampleCount = 0;
+        }
+    }
+
+    static void scrollCallback(GLFWwindow* window, double xOffset, double yOffset) {
+        if (yOffset == 0.0) return;
+        auto app = static_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+        const float distance = std::clamp(app->cameraDistance *
+            std::exp(-0.12f * static_cast<float>(std::clamp(yOffset, -20.0, 20.0))), 0.1f, 20.0f);
+        if (distance != app->cameraDistance) {
+            app->cameraDistance = distance;
+            app->sampleCount = 0;
+        }
     }
 
     static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
@@ -1558,6 +1629,16 @@ private:
             swapChainImageFormat == VK_FORMAT_R8G8B8A8_SRGB;
         PushConstants pushConstants{sampleCount + 1, swapChainExtent.width, swapChainExtent.height,
             hardwareSrgb ? 0u : 1u, frameSeed};
+        const glm::vec3 offset = cameraDistance * glm::vec3(
+            std::cos(cameraPitch) * std::sin(cameraYaw), std::sin(cameraPitch),
+            std::cos(cameraPitch) * std::cos(cameraYaw));
+        const glm::vec3 forward = glm::normalize(-offset);
+        const glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3(0, 1, 0)));
+        const glm::vec3 up = glm::cross(right, forward);
+        pushConstants.cameraOrigin = glm::vec4(cameraTarget + offset, 0.0f);
+        pushConstants.cameraRight = glm::vec4(right, 0.0f);
+        pushConstants.cameraUp = glm::vec4(up, 0.0f);
+        pushConstants.cameraForward = glm::vec4(forward, 0.0f);
 
         // 在命令缓冲区中推送常量
         vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pushConstants);

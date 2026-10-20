@@ -1,0 +1,46 @@
+[
+  {
+    "name": "teapot",
+    "file": "teapot-low.obj",
+    "vertices": 2310,
+    "triangles": 4000,
+    "original_vertices": 3644,
+    "processing": "triangulation + quadric edge-collapse decimation",
+    "source": "https://github.com/alecjacobson/common-3d-test-models/blob/master/data/teapot.obj",
+    "original_sha256": "1b5396fedd74b577e32cef41146582c2f2e1a050d5b4915193c0ac1ad4187ed4",
+    "output_sha256": "23816a522ecb92f8f4b214f58270655761fadb3bcdfad764ff3ac408671637cf"
+  },
+  {
+    "name": "suzanne",
+    "file": "suzanne-low.obj",
+    "vertices": 2012,
+    "triangles": 3936,
+    "original_vertices": 507,
+    "processing": "one Catmull-Clark subdivision + triangulation",
+    "source": "https://github.com/alecjacobson/common-3d-test-models/blob/master/data/suzanne.obj",
+    "original_sha256": "d8684326f9bd8cfc24d3d302c1042fa16f63d2e66e49ed56b413fa20bed271e6",
+    "output_sha256": "896fd50ac29408407bdfd41de32d29d5fd22b6f95a008ab74776ceee9e88ac97"
+  },
+  {
+    "name": "cow",
+    "file": "cow-low.obj",
+    "vertices": 2001,
+    "triangles": 4000,
+    "original_vertices": 2903,
+    "processing": "triangulation + quadric edge-collapse decimation",
+    "source": "https://github.com/alecjacobson/common-3d-test-models/blob/master/data/cow.obj",
+    "original_sha256": "69afce548640bc2beb0c44894d1a24d5766cc9cd3fd74f3ec55b4e229104b23f",
+    "output_sha256": "1209938bc560cd48af87328e18e4e48a43b58c491a077f385639d7ff402abec9"
+  },
+  {
+    "name": "fandisk",
+    "file": "fandisk-low.obj",
+    "vertices": 2002,
+    "triangles": 4000,
+    "original_vertices": 6475,
+    "processing": "triangulation + quadric edge-collapse decimation",
+    "source": "https://github.com/alecjacobson/common-3d-test-models/blob/master/data/fandisk.obj",
+    "original_sha256": "ea5bab2fbf545b1915f0d9faf6cc61ff8c18e0d8174ad61f8e35de15d8f6e3f8",
+    "output_sha256": "69a65384dcef943e874bd69bf952cfb4b784022c1d55672ee67e8a2b217e9276"
+  }
+]

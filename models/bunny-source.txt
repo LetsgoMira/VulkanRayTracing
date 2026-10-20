@@ -1,0 +1,14 @@
+Stanford Bunny - official reduced-resolution meshes
+Original authors: Greg Turk and Marc Levoy, Stanford University.
+Source: https://graphics.stanford.edu/data/3Dscanrep/#bunny
+Download: https://graphics.stanford.edu/pub/3Dscanrep/bunny.tar.gz
+Downloaded: 2026-10-20
+Converted from ASCII PLY to OBJ; vertex coordinates and triangle winding unchanged.
+
+Default bunny.obj: copy of bunny-res3.obj (1889 vertices, 3851 triangles)
+bunny-res2.obj: 8171 vertices, 16301 triangles
+bunny-res3.obj: 1889 vertices, 3851 triangles
+bunny-res4.obj: 453 vertices, 948 triangles
+bunny-full.obj: previous downloaded full-resolution OBJ (35947 vertices, 69451 triangles)
+
+To switch: copy the desired OBJ over bunny.obj, or pass its path as a command-line argument.

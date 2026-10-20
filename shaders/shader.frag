@@ -6,6 +6,10 @@ layout(push_constant) uniform PushConstants {
     uint height;
     uint encodeSrgb;
     uint frameSeed;
+    layout(offset = 32) vec4 cameraOrigin;
+    vec4 cameraRight;
+    vec4 cameraUp;
+    vec4 cameraForward;
 };
 layout(location = 0) out vec4 historyColor;
 layout(location = 1) out vec4 fragColor;
@@ -47,10 +51,11 @@ struct Hit {
     vec3 color;
     uint emissive;
     float roughness;
+    uint triangleId;
 };
 
 Hit miss(float maxDistance) {
-    return Hit(false, maxDistance, vec3(0), vec3(0), vec3(0), 0u, 1.0);
+    return Hit(false, maxDistance, vec3(0), vec3(0), vec3(0), 0u, 1.0, ~0u);
 }
 
 Hit hitTriangle(uint triangleId, Ray ray, float maxDistance) {
@@ -80,7 +85,7 @@ Hit hitTriangle(uint triangleId, Ray ray, float maxDistance) {
 
     normal /= normalLength;
     if (dot(normal, ray.direction) > 0.0) normal = -normal;
-    return Hit(true, t, ray.origin + t * ray.direction, normal, a.color, a.emissive, a.roughness);
+    return Hit(true, t, ray.origin + t * ray.direction, normal, a.color, a.emissive, a.roughness, triangleId);
 }
 
 float hitAABB(Ray ray, vec3 lower, vec3 upper, float maxDistance) {
@@ -111,8 +116,8 @@ Hit hitArray(Ray ray, int first, int count, float maxDistance) {
     return closest;
 }
 
-Hit hitBVH(Ray ray) {
-    Hit closest = miss(FAR_DISTANCE);
+Hit hitBVH(Ray ray, float maxDistance) {
+    Hit closest = miss(maxDistance);
     int stack[STACK_CAPACITY];
     int sp = 0;
     stack[sp++] = 0;
@@ -128,11 +133,11 @@ Hit hitBVH(Ray ray) {
         float rightT = hitAABB(ray, BVHNodes[node.right].AA, BVHNodes[node.right].BB, closest.distance);
         if (leftT >= 0.0 && rightT >= 0.0) {
             // Defensive fallback if a future builder violates the depth contract.
-            if (sp + 2 > STACK_CAPACITY) return hitArray(ray, 0, triangles.length(), FAR_DISTANCE);
+            if (sp + 2 > STACK_CAPACITY) return hitArray(ray, 0, triangles.length(), maxDistance);
             stack[sp++] = leftT <= rightT ? node.right : node.left;
             stack[sp++] = leftT <= rightT ? node.left : node.right;
         } else if (leftT >= 0.0 || rightT >= 0.0) {
-            if (sp + 1 > STACK_CAPACITY) return hitArray(ray, 0, triangles.length(), FAR_DISTANCE);
+            if (sp + 1 > STACK_CAPACITY) return hitArray(ray, 0, triangles.length(), maxDistance);
             stack[sp++] = leftT >= 0.0 ? node.left : node.right;
         }
     }
@@ -162,32 +167,113 @@ vec3 sampleCosineHemisphere(vec3 normal) {
         sqrt(max(0.0, 1.0 - r * r)) * normal);
 }
 
+// loadModel appends the ceiling rectangle as the last six vertices/two triangles.
+// Derive its geometry and emission from those buffers so CPU edits stay in sync.
+bool isCeilingLight(Hit hit) {
+    return hit.found && hit.emissive != 0u && hit.triangleId >= uint(indices.length() / 3 - 2);
+}
+void ceilingLight(out vec3 corner, out vec3 edgeU, out vec3 edgeV,
+                  out vec3 normal, out float area, out vec3 emission) {
+    int first = vertices.length() - 6;
+    corner = vertices[first + 2].pos;
+    edgeU = vertices[first].pos - corner;
+    edgeV = vertices[first + 1].pos - corner;
+    vec3 crossEdges = cross(edgeU, edgeV);
+    area = length(crossEdges);
+    normal = crossEdges / area;
+    emission = vertices[first].color;
+}
+float lightPdf(vec3 origin, vec3 lightPoint) {
+    vec3 corner, edgeU, edgeV, normal, emission;
+    float area;
+    ceilingLight(corner, edgeU, edgeV, normal, area, emission);
+    vec3 delta = lightPoint - origin;
+    float distanceSquared = dot(delta, delta);
+    if (distanceSquared == 0.0) return 0.0;
+    // Match the existing two-sided emission, including views above the lamp.
+    float lightCosine = abs(dot(normal, -delta * inversesqrt(distanceSquared)));
+    return lightCosine > 0.0 ? distanceSquared / (area * lightCosine) : 0.0;
+}
+float powerHeuristic(float pdfA, float pdfB) {
+    // Normalize first to avoid overflow when the light is nearly edge-on.
+    float scale = max(pdfA, pdfB);
+    if (scale == 0.0) return 0.0;
+    float a = pdfA / scale;
+    float b = pdfB / scale;
+    return a * a / (a * a + b * b);
+}
+vec3 offsetOrigin(Hit hit) {
+    float scale = max(1.0, max(abs(hit.position.x), max(abs(hit.position.y), abs(hit.position.z))));
+    return hit.position + hit.normal * (1.0e-4 * scale);
+}
+vec3 sampleDirectLight(Hit hit, vec3 origin, float diffuseWeight) {
+    if (diffuseWeight == 0.0) return vec3(0.0); // Ideal mirrors have no continuous lobe.
+    vec3 corner, edgeU, edgeV, normal, emission;
+    float area;
+    ceilingLight(corner, edgeU, edgeV, normal, area, emission);
+    vec3 point = corner + randomFloat() * edgeU + randomFloat() * edgeV;
+    vec3 delta = point - origin;
+    float distance = length(delta);
+    if (distance <= RAY_MIN_T) return vec3(0.0);
+    vec3 direction = delta / distance;
+    float cosine = max(dot(hit.normal, direction), 0.0);
+    if (cosine == 0.0) return vec3(0.0);
+    float pdfLight = lightPdf(origin, point);
+    if (pdfLight == 0.0) return vec3(0.0);
+    // Stop at the sampled endpoint; tolerate intersection rounding on the lamp
+    // itself, but never ignore a nearer model/wall occluder.
+    Hit blocker = hitBVH(Ray(origin, direction), distance + RAY_MIN_T);
+    if (blocker.found && !isCeilingLight(blocker)) return vec3(0.0);
+    float pdfBsdf = diffuseWeight * cosine / PI;
+    vec3 bsdf = diffuseWeight * clamp(hit.color, vec3(0.0), vec3(1.0)) / PI;
+    return emission * bsdf * cosine * powerHeuristic(pdfLight, pdfBsdf) / pdfLight;
+}
+
 vec3 pathTrace(Ray ray) {
+    vec3 radiance = vec3(0.0);
     vec3 throughput = vec3(1.0);
+    bool previousDelta = true;
+    float previousBsdfPdf = 0.0;
     for (int bounce = 0; bounce < MAX_BOUNCES; ++bounce) {
-        Hit hit = hitBVH(ray);
-        if (!hit.found) return vec3(0.0);
-        if (hit.emissive != 0u) return throughput * hit.color;
+        Hit hit = hitBVH(ray, FAR_DISTANCE);
+        if (!hit.found) break;
+        if (hit.emissive != 0u) {
+            float weight = 1.0;
+            if (!previousDelta && isCeilingLight(hit)) {
+                weight = powerHeuristic(previousBsdfPdf, lightPdf(ray.origin, hit.position));
+            }
+            radiance += throughput * hit.color * weight;
+            break;
+        }
+        // Preserve the old eight-intersection path limit: do not add an NEE
+        // path whose final emitter would be an otherwise untraced ninth hit.
+        if (bounce == MAX_BOUNCES - 1) break;
 
         // roughness is the diffuse mixture weight, NOT a GGX roughness.
         // Choose a Lambertian lobe (pdf=cos/pi) or an ideal mirror lobe.
         // The selection probability cancels the matching BSDF mixture weight.
         float diffuseWeight = clamp(hit.roughness, 0.0, 1.0);
+        vec3 origin = offsetOrigin(hit);
+        radiance += throughput * sampleDirectLight(hit, origin, diffuseWeight);
         if (randomFloat() < diffuseWeight) {
             ray.direction = sampleCosineHemisphere(hit.normal);
+            previousDelta = false;
+            // Includes the probability of selecting the diffuse mixture lobe.
+            previousBsdfPdf = diffuseWeight * max(dot(hit.normal, ray.direction), 0.0) / PI;
         } else {
             ray.direction = normalize(reflect(ray.direction, hit.normal));
+            previousDelta = true;
+            previousBsdfPdf = 0.0;
         }
         throughput *= clamp(hit.color, vec3(0.0), vec3(1.0));
-        float scale = max(1.0, max(abs(hit.position.x), max(abs(hit.position.y), abs(hit.position.z))));
-        ray.origin = hit.position + hit.normal * (1.0e-4 * scale);
+        ray.origin = origin;
         if (bounce >= 3) {
             float survival = clamp(max(throughput.x, max(throughput.y, throughput.z)), 0.05, 0.95);
-            if (randomFloat() >= survival) return vec3(0.0);
+            if (randomFloat() >= survival) break;
             throughput /= survival;
         }
     }
-    return vec3(0.0);
+    return radiance;
 }
 
 vec3 linearToSrgb(vec3 value) {
@@ -202,7 +288,8 @@ void main() {
     vec2 uv = (gl_FragCoord.xy + jitter) / vec2(width, height);
     vec2 ndc = vec2(2.0 * uv.x - 1.0, 1.0 - 2.0 * uv.y);
     ndc.x *= float(width) / float(height);
-    Ray ray = Ray(vec3(0, 0, 2), normalize(vec3(ndc, -1.0)));
+    Ray ray = Ray(cameraOrigin.xyz, normalize(cameraForward.xyz +
+        ndc.x * cameraRight.xyz + ndc.y * cameraUp.xyz));
     vec3 sampleColor = pathTrace(ray);
     vec3 average = sampleColor;
     if (sampleCount > 1u) {

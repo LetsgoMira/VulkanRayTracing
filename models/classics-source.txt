@@ -1,0 +1,35 @@
+Classic low-resolution models prepared on 2026-10-20
+
+Download source: https://github.com/alecjacobson/common-3d-test-models
+Original OBJ downloads are preserved in originals/.
+Source URLs and original/output SHA256 hashes: classics-manifest.json.
+Original attribution as listed in the source repository:
+  Teapot: Martin Newell
+  Suzanne: Blender
+  Cow: Viewpoint Animation Engineering / Sun Microsystems
+  Fandisk: Pratt & Whitney / Hugues Hoppe
+Refer to the original sources for applicable usage terms.
+
+teapot-low.obj: 2310 vertices, 4000 triangles
+suzanne-low.obj: 2012 vertices, 3936 triangles
+cow-low.obj: 2001 vertices, 4000 triangles
+fandisk-low.obj: 2002 vertices, 4000 triangles
+
+Teapot, Cow, Fandisk: triangulated and reduced using quadric edge collapse.
+Suzanne: one Catmull-Clark subdivision of the 507-vertex source, triangulated.
+All four: geometry only; no texture/material dependencies. Fit for the current
+renderer transform p*6+(0.2,-1,0): longest dimension 1.15 world units,
+XZ center at origin, bottom at Y=-0.98 (just above the floor).
+Preview: classics-preview.png (offline mesh preview, not a renderer screenshot).
+
+Select in Visual Studio: Project Properties > Debugging > Command Arguments:
+  models/teapot-low.obj
+  models/suzanne-low.obj
+  models/cow-low.obj
+  models/fandisk-low.obj
+Working Directory must be $(ProjectDir). Clear arguments to return to bunny.
+No C++ or shader rebuild needed to switch the model.
+
+Rebuild assets: python models/prepare_classics.py
+Requires NumPy and fast-simplification; the latter was installed locally in
+.model-tools with --no-deps. Neither is needed to run the renderer.
